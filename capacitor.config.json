@@ -1,0 +1,15 @@
+{
+  "appId": "com.kamakhya.pos",
+  "appName": "Kamakhya POS",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "buildOptions": {
+      "keystorePath": "",
+      "keystoreAlias": ""
+    }
+  }
+}

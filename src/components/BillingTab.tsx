@@ -1,5 +1,14 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Product, CartItem, Invoice, StoreSettings, Customer } from '../types';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  Product,
+  CartItem,
+  Invoice,
+  StoreSettings,
+  Customer,
+  ParkedBill,
+  HardwareConfig,
+  InvoiceStyle,
+} from '../types';
 import {
   Barcode,
   Camera,
@@ -12,11 +21,18 @@ import {
   QrCode,
   Sparkles,
   ShoppingBag,
+  Zap,
+  Printer,
+  PauseCircle,
+  Radio,
+  CheckCircle2,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { CameraScannerModal } from './CameraScannerModal';
 import { PrintableInvoice } from './PrintableInvoice';
 import { UpiQrModal } from './UpiQrModal';
+import { QuickActionsModal } from './QuickActionsModal';
+import { DeviceConnectModal } from './DeviceConnectModal';
 
 interface BillingTabProps {
   products: Product[];
@@ -24,13 +40,19 @@ interface BillingTabProps {
   settings: StoreSettings;
   onInvoiceGenerated: (invoice: Invoice, updatedProducts: Product[]) => void;
   onAddOrUpdateCustomer: (customer: Customer) => void;
+  onAddProduct: (product: Product) => void;
+  onUpdateHardware: (hw: HardwareConfig) => void;
 }
+
+const PARKED_BILLS_KEY = 'kamakhya_parked_bills';
 
 export const BillingTab: React.FC<BillingTabProps> = ({
   products,
   customers,
   settings,
   onInvoiceGenerated,
+  onAddProduct,
+  onUpdateHardware,
 }) => {
   // Customer info
   const [custName, setCustName] = useState('');
@@ -48,19 +70,57 @@ export const BillingTab: React.FC<BillingTabProps> = ({
   const [discountType, setDiscountType] = useState<'flat' | 'percent'>('flat');
   const [discountValue, setDiscountValue] = useState<number>(0);
   const [taxPercent, setTaxPercent] = useState<number>(settings.defaultTaxPercent || 0);
-  const [paymentMode, setPaymentMode] = useState<'Cash' | 'UPI' | 'Card' | 'Due'>('Cash');
+  const [paymentMode, setPaymentMode] = useState<string>('Cash');
   const [amountReceived, setAmountReceived] = useState<number>(0);
   const [notes, setNotes] = useState('');
 
   // Modals & previews
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isUpiModalOpen, setIsUpiModalOpen] = useState(false);
+  const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
+  const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
   const [currentInvoice, setCurrentInvoice] = useState<Invoice | null>(null);
-  const [invoiceTemplate, setInvoiceTemplate] = useState<'modern' | 'classic' | 'thermal'>(
-    settings.invoiceTemplate
+  const [invoiceTemplate, setInvoiceTemplate] = useState<InvoiceStyle>(
+    settings.invoiceTemplate || 'modern'
   );
 
+  // Parked Bills state
+  const [parkedBills, setParkedBills] = useState<ParkedBill[]>(() => {
+    try {
+      const stored = localStorage.getItem(PARKED_BILLS_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
   const barcodeInputRef = useRef<HTMLInputElement>(null);
+
+  // Save parked bills to localStorage
+  useEffect(() => {
+    localStorage.setItem(PARKED_BILLS_KEY, JSON.stringify(parkedBills));
+  }, [parkedBills]);
+
+  // Audio beep player
+  const playBeepSound = useCallback(() => {
+    if (!settings.hardware?.scannerGunBeep) return;
+    try {
+      const audioCtx = new (window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(987.77, audioCtx.currentTime); // B5 crisp scanner beep
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.12);
+    } catch {
+      // Audio not permitted
+    }
+  }, [settings.hardware?.scannerGunBeep]);
 
   // Calculations
   const subtotal = cart.reduce((acc, it) => acc + it.total, 0);
@@ -94,41 +154,107 @@ export const BillingTab: React.FC<BillingTabProps> = ({
   };
 
   // Add product to cart helper
-  const addProductToCart = (product: Product, quantityToAdd: number = 1) => {
-    if (product.stock <= 0) {
-      setBarcodeSearchFeedback(`Warning: "${product.name}" out of stock!`);
-      setTimeout(() => setBarcodeSearchFeedback(null), 3000);
-    }
-
-    setCart((prev) => {
-      const existingIndex = prev.findIndex((item) => item.productId === product.id);
-      if (existingIndex >= 0) {
-        const updated = [...prev];
-        const newQty = updated[existingIndex].quantity + quantityToAdd;
-        updated[existingIndex] = {
-          ...updated[existingIndex],
-          quantity: newQty,
-          total: newQty * updated[existingIndex].price,
-        };
-        return updated;
-      } else {
-        const newItem: CartItem = {
-          productId: product.id,
-          name: product.name,
-          category: product.category,
-          price: product.price,
-          quantity: quantityToAdd,
-          barcode: product.barcode,
-          unit: product.unit || 'pcs',
-          total: product.price * quantityToAdd,
-        };
-        return [...prev, newItem];
+  const addProductToCart = useCallback(
+    (product: Product, quantityToAdd: number = 1) => {
+      if (product.stock <= 0) {
+        setBarcodeSearchFeedback(`Warning: "${product.name}" stock me nahi hai!`);
+        setTimeout(() => setBarcodeSearchFeedback(null), 3000);
       }
-    });
 
-    setBarcodeSearchFeedback(`Added: ${product.name}`);
-    setTimeout(() => setBarcodeSearchFeedback(null), 2000);
-  };
+      setCart((prev) => {
+        const existingIndex = prev.findIndex((item) => item.productId === product.id);
+        if (existingIndex >= 0) {
+          const updated = [...prev];
+          const newQty = updated[existingIndex].quantity + quantityToAdd;
+          updated[existingIndex] = {
+            ...updated[existingIndex],
+            quantity: newQty,
+            total: newQty * updated[existingIndex].price,
+          };
+          return updated;
+        } else {
+          const newItem: CartItem = {
+            productId: product.id,
+            name: product.name,
+            category: product.category,
+            price: product.price,
+            quantity: quantityToAdd,
+            barcode: product.barcode,
+            unit: product.unit || 'pcs',
+            total: product.price * quantityToAdd,
+            hsnCode: product.hsnCode,
+          };
+          return [...prev, newItem];
+        }
+      });
+
+      playBeepSound();
+      setBarcodeSearchFeedback(`🔫 Added: ${product.name} (₹${product.price})`);
+      setTimeout(() => setBarcodeSearchFeedback(null), 2500);
+    },
+    [playBeepSound]
+  );
+
+  // HARDWARE BARCODE SCANNER GUN GLOBAL KEYBOARD LISTENER
+  // Scanners type rapid characters (< 40ms interval) terminated by Enter
+  useEffect(() => {
+    if (!settings.hardware?.scannerGunEnabled) return;
+
+    let buffer = '';
+    let lastKeyTime = Date.now();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+
+      // If user is focused on customer name / search input, let standard input handle it
+      // unless it's an ultra-fast burst from a physical scanner gun!
+      const currentTime = Date.now();
+      const timeDiff = currentTime - lastKeyTime;
+      lastKeyTime = currentTime;
+
+      if (e.key === 'Enter') {
+        if (buffer.length >= 3 && timeDiff < 60) {
+          // Scanner burst detected!
+          e.preventDefault();
+          const scannedCode = buffer.trim();
+          buffer = '';
+
+          const matched = products.find(
+            (p) =>
+              p.barcode.toLowerCase() === scannedCode.toLowerCase() ||
+              p.id.toLowerCase() === scannedCode.toLowerCase()
+          );
+
+          if (matched) {
+            addProductToCart(matched, 1);
+          } else {
+            setBarcodeSearchFeedback(`Gun Scanned code "${scannedCode}" not found in stock!`);
+            setTimeout(() => setBarcodeSearchFeedback(null), 3500);
+          }
+        } else {
+          buffer = '';
+        }
+        return;
+      }
+
+      // Record key if it's printable character
+      if (e.key.length === 1) {
+        if (timeDiff > 70) {
+          // Reset buffer if typed slowly by human hand
+          buffer = e.key;
+        } else {
+          buffer += e.key;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [products, addProductToCart, settings.hardware?.scannerGunEnabled]);
 
   // Barcode search / scan handler
   const handleBarcodeSubmit = (e?: React.FormEvent) => {
@@ -136,7 +262,6 @@ export const BillingTab: React.FC<BillingTabProps> = ({
     const query = barcodeInput.trim();
     if (!query) return;
 
-    // Search by exact barcode or matching product code
     const found = products.find(
       (p) =>
         p.barcode.toLowerCase() === query.toLowerCase() ||
@@ -193,6 +318,90 @@ export const BillingTab: React.FC<BillingTabProps> = ({
     setNotes('');
   };
 
+  // Hold / Park Current Bill
+  const handleParkCurrentBill = () => {
+    if (cart.length === 0) {
+      alert('Hold karne ke liye cart me item hona chahiye!');
+      return;
+    }
+
+    const newParked: ParkedBill = {
+      id: 'parked-' + Date.now(),
+      customerName: custName.trim() || 'Walk-in Customer',
+      customerPhone: custPhone.trim(),
+      items: [...cart],
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      notes,
+    };
+
+    setParkedBills((prev) => [newParked, ...prev]);
+    setCart([]);
+    setCustName('');
+    setCustPhone('');
+    setDiscountValue(0);
+    setAmountReceived(0);
+    setBarcodeSearchFeedback('Bill hold par rakh diya gaya! Aap naya bill bana sakte hain.');
+    setTimeout(() => setBarcodeSearchFeedback(null), 3000);
+  };
+
+  // Resume Parked Bill
+  const handleResumeParkedBill = (pb: ParkedBill) => {
+    if (cart.length > 0) {
+      if (
+        !window.confirm(
+          'Current cart me items hain. Kya aap unhe hata kar hold kiya hua bill load karna chahte hain?'
+        )
+      ) {
+        return;
+      }
+    }
+
+    setCart(pb.items);
+    setCustName(pb.customerName === 'Walk-in Customer' ? '' : pb.customerName);
+    setCustPhone(pb.customerPhone);
+    setNotes(pb.notes || '');
+    setParkedBills((prev) => prev.filter((b) => b.id !== pb.id));
+    setBarcodeSearchFeedback(`Parked bill resumed: ${pb.customerName} (${pb.items.length} items)`);
+    setTimeout(() => setBarcodeSearchFeedback(null), 2500);
+  };
+
+  // Delete Parked Bill
+  const handleDeleteParkedBill = (billId: string) => {
+    setParkedBills((prev) => prev.filter((b) => b.id !== billId));
+  };
+
+  // Add Custom Item On The Fly (from Quick Actions floating modal)
+  const handleAddCustomItem = (newItem: CartItem, saveToCatalog: boolean) => {
+    setCart((prev) => [...prev, newItem]);
+    playBeepSound();
+
+    if (saveToCatalog) {
+      const newProduct: Product = {
+        id: newItem.productId,
+        name: newItem.name,
+        category: newItem.category,
+        price: newItem.price,
+        costPrice: Math.round(newItem.price * 0.7),
+        stock: 50,
+        minStock: 5,
+        barcode: newItem.barcode,
+        unit: newItem.unit,
+        createdAt: new Date().toISOString().split('T')[0],
+      };
+      onAddProduct(newProduct);
+      setBarcodeSearchFeedback(`Added custom item & saved to catalog: ${newItem.name}`);
+    } else {
+      setBarcodeSearchFeedback(`Custom item added to bill: ${newItem.name}`);
+    }
+    setTimeout(() => setBarcodeSearchFeedback(null), 2500);
+  };
+
+  // Apply Quick Preset Discount
+  const handleApplyDiscount = (type: 'flat' | 'percent', val: number) => {
+    setDiscountType(type);
+    setDiscountValue(val);
+  };
+
   // Generate Invoice
   const handleGenerateInvoice = () => {
     if (cart.length === 0) {
@@ -243,6 +452,13 @@ export const BillingTab: React.FC<BillingTabProps> = ({
     onInvoiceGenerated(newInvoice, updatedProducts);
     setCurrentInvoice(newInvoice);
 
+    // Auto-Print check
+    if (settings.hardware?.autoPrintOnBill) {
+      setTimeout(() => {
+        window.print();
+      }, 400);
+    }
+
     // Celebration confetti
     try {
       confetti({
@@ -265,7 +481,64 @@ export const BillingTab: React.FC<BillingTabProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 relative">
+      {/* 0. HARDWARE STATUS & SHORTCUTS TOOLBAR */}
+      <div className="bg-gradient-to-r from-amber-50 to-stone-50 rounded-2xl p-3 border border-amber-200/80 flex flex-wrap items-center justify-between gap-2 shadow-2xs">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Barcode Gun indicator */}
+          <button
+            type="button"
+            onClick={() => setIsDeviceModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-stone-200 text-stone-800 text-xs font-semibold hover:border-amber-400 hover:shadow-xs transition-all"
+            title="Click to test or configure Barcode Scanner Gun"
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="font-bold text-[#7B001C]">🔫 Scanner Gun:</span>
+            <span className="text-emerald-700 font-medium">Ready (Auto-Detect)</span>
+          </button>
+
+          {/* Printer indicator */}
+          <button
+            type="button"
+            onClick={() => setIsDeviceModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-stone-200 text-stone-800 text-xs font-semibold hover:border-amber-400 hover:shadow-xs transition-all"
+            title="Click to test receipt printer connection"
+          >
+            <Printer className="w-3.5 h-3.5 text-blue-600" />
+            <span className="font-bold text-stone-800">🖨️ Printer:</span>
+            <span className="text-blue-700 font-medium">
+              {settings.hardware?.printerType === 'thermal80'
+                ? 'Thermal 80mm'
+                : settings.hardware?.printerType === 'thermal58'
+                ? 'Thermal 58mm'
+                : 'System / Wi-Fi'}
+            </span>
+          </button>
+
+          {/* Parked bills badge */}
+          {parkedBills.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setIsQuickActionsOpen(true)}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-100/80 text-amber-900 border border-amber-300 text-xs font-bold animate-pulse"
+            >
+              <PauseCircle className="w-3.5 h-3.5 text-amber-700" />
+              <span>{parkedBills.length} Bill On Hold</span>
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsDeviceModalOpen(true)}
+            className="px-3 py-1.5 rounded-xl bg-[#7B001C] hover:bg-[#560013] text-[#FFC107] text-xs font-bold flex items-center gap-1 shadow-xs transition-colors"
+          >
+            <Zap className="w-3.5 h-3.5" /> Hardware Connect
+          </button>
+        </div>
+      </div>
+
       {/* 1. Customer Info & Quick Autocomplete Card */}
       <div className="bg-white rounded-2xl p-5 shadow-sm border-l-4 border-[#7B001C] border-stone-200">
         <div className="flex items-center justify-between mb-3">
@@ -281,38 +554,34 @@ export const BillingTab: React.FC<BillingTabProps> = ({
             <label className="block text-xs font-semibold text-stone-600 mb-1">
               Grahak Ka Naam (Customer Name)
             </label>
-            <div className="relative">
-              <input
-                type="text"
-                value={custName}
-                onChange={(e) => {
-                  setCustName(e.target.value);
-                  setShowCustomerSuggestions(true);
-                }}
-                onFocus={() => setShowCustomerSuggestions(true)}
-                placeholder="e.g. Pooja Sharma, Anita Ji..."
-                className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-sm outline-none focus:border-[#7B001C] focus:bg-white transition-colors"
-              />
-            </div>
+            <input
+              type="text"
+              value={custName}
+              onChange={(e) => {
+                setCustName(e.target.value);
+                setShowCustomerSuggestions(true);
+              }}
+              onFocus={() => setShowCustomerSuggestions(true)}
+              placeholder="e.g. Pooja Sharma, Anita Ji..."
+              className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-sm outline-none focus:border-[#7B001C] focus:bg-white transition-colors"
+            />
           </div>
 
           <div>
             <label className="block text-xs font-semibold text-stone-600 mb-1">
               Mobile Number (WhatsApp Bill)
             </label>
-            <div className="relative">
-              <input
-                type="tel"
-                value={custPhone}
-                onChange={(e) => {
-                  setCustPhone(e.target.value);
-                  setShowCustomerSuggestions(true);
-                }}
-                onFocus={() => setShowCustomerSuggestions(true)}
-                placeholder="10-digit mobile number"
-                className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-sm outline-none focus:border-[#7B001C] focus:bg-white transition-colors font-mono"
-              />
-            </div>
+            <input
+              type="tel"
+              value={custPhone}
+              onChange={(e) => {
+                setCustPhone(e.target.value);
+                setShowCustomerSuggestions(true);
+              }}
+              onFocus={() => setShowCustomerSuggestions(true)}
+              placeholder="10-digit mobile number"
+              className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-sm outline-none focus:border-[#7B001C] focus:bg-white transition-colors font-mono"
+            />
           </div>
 
           {/* Autocomplete Suggestions */}
@@ -358,7 +627,7 @@ export const BillingTab: React.FC<BillingTabProps> = ({
       <div className="bg-white rounded-2xl p-5 shadow-sm border-l-4 border-[#FFC107] border-stone-200">
         <h2 className="text-base font-bold text-stone-800 flex items-center gap-2 mb-3">
           <Barcode className="w-5 h-5 text-[#7B001C]" />
-          Item Chuniye ya Barcode Scan Karein
+          Item Chuniye ya Barcode Gun Se Scan Karein
         </h2>
 
         {/* Barcode Search Bar & Camera Trigger */}
@@ -369,7 +638,7 @@ export const BillingTab: React.FC<BillingTabProps> = ({
               type="text"
               value={barcodeInput}
               onChange={(e) => setBarcodeInput(e.target.value)}
-              placeholder="Barcode scan karein ya type karein (e.g. KCC100201)..."
+              placeholder="Barcode gun trigger karein ya code likhein (e.g. KCC100201)..."
               className="w-full pl-9 pr-3 py-2.5 bg-stone-50 border border-stone-300 rounded-xl text-sm font-mono outline-none focus:border-[#7B001C] focus:bg-white transition-colors"
             />
             <Barcode className="w-4 h-4 text-stone-400 absolute left-3 top-3.5" />
@@ -378,7 +647,7 @@ export const BillingTab: React.FC<BillingTabProps> = ({
           <div className="flex gap-2">
             <button
               type="submit"
-              className="px-4 py-2.5 bg-[#7B001C] hover:bg-[#560013] text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs"
+              className="px-4 py-2.5 bg-[#7B001C] hover:bg-[#560013] text-[#FFC107] rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs"
             >
               <Plus className="w-4 h-4" /> Add Code
             </button>
@@ -395,9 +664,9 @@ export const BillingTab: React.FC<BillingTabProps> = ({
         </form>
 
         {barcodeSearchFeedback && (
-          <div className="mb-3 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center gap-1.5 animate-in fade-in">
-            <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-            {barcodeSearchFeedback}
+          <div className="mb-3 px-3 py-2 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-center gap-2 font-medium shadow-xs animate-in fade-in">
+            <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>{barcodeSearchFeedback}</span>
           </div>
         )}
 
@@ -451,22 +720,35 @@ export const BillingTab: React.FC<BillingTabProps> = ({
               Cart Items ({cart.reduce((a, b) => a + b.quantity, 0)})
             </h2>
           </div>
-          {cart.length > 0 && (
-            <button
-              onClick={clearCart}
-              className="text-stone-400 hover:text-red-600 text-xs flex items-center gap-1 transition-colors"
-            >
-              <RotateCcw className="w-3.5 h-3.5" /> Khali Karein (Clear)
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {cart.length > 0 && (
+              <button
+                type="button"
+                onClick={handleParkCurrentBill}
+                className="text-amber-800 hover:text-amber-950 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 text-xs font-semibold flex items-center gap-1 transition-colors"
+                title="Hold current cart for another customer"
+              >
+                <PauseCircle className="w-3.5 h-3.5 text-amber-600" /> Hold Bill
+              </button>
+            )}
+            {cart.length > 0 && (
+              <button
+                onClick={clearCart}
+                className="text-stone-400 hover:text-red-600 text-xs flex items-center gap-1 transition-colors"
+              >
+                <RotateCcw className="w-3.5 h-3.5" /> Clear
+              </button>
+            )}
+          </div>
         </div>
 
         {cart.length === 0 ? (
           <div className="py-12 text-center border-2 border-dashed border-stone-200 rounded-xl bg-stone-50/50">
             <ShoppingBag className="w-10 h-10 text-stone-300 mx-auto mb-2" />
-            <p className="text-stone-500 text-sm font-medium">Cart abhi khali hai</p>
+            <p className="text-stone-600 text-sm font-semibold">Cart abhi khali hai</p>
             <p className="text-stone-400 text-xs mt-1">
-              Upar se barcode scan karein ya item select karke add karein
+              Barcode gun se scan karein ya niche <strong>'+ Quick Actions'</strong> dabakar custom
+              item jodein!
             </p>
           </div>
         ) : (
@@ -594,14 +876,16 @@ export const BillingTab: React.FC<BillingTabProps> = ({
                 <label className="block text-xs font-semibold text-stone-600 mb-1.5">
                   Payment Mode (Bhugtan Ka Madhyam)
                 </label>
-                <div className="grid grid-cols-4 gap-2">
-                  {(['Cash', 'UPI', 'Card', 'Due'] as const).map((mode) => (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {(settings.paymentMethods || ['Cash', 'UPI', 'Card', 'Due']).map((mode) => (
                     <button
                       key={mode}
                       type="button"
                       onClick={() => {
                         setPaymentMode(mode);
-                        if (mode === 'UPI') setIsUpiModalOpen(true);
+                        if (mode === 'UPI' || mode.toLowerCase().includes('qr') || mode.toLowerCase().includes('upi')) {
+                          setIsUpiModalOpen(true);
+                        }
                       }}
                       className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all text-center ${
                         paymentMode === mode
@@ -613,6 +897,7 @@ export const BillingTab: React.FC<BillingTabProps> = ({
                       {mode === 'UPI' && '📱 UPI'}
                       {mode === 'Card' && '💳 Card'}
                       {mode === 'Due' && '📝 Udhar'}
+                      {!['Cash', 'UPI', 'Card', 'Due'].includes(mode) && `💳 ${mode}`}
                     </button>
                   ))}
                 </div>
@@ -632,7 +917,6 @@ export const BillingTab: React.FC<BillingTabProps> = ({
                     />
                   </div>
 
-                  {/* Quick Tender Suggestions */}
                   <div className="flex gap-1.5 justify-end">
                     {[grandTotal, Math.ceil(grandTotal / 100) * 100, Math.ceil(grandTotal / 500) * 500].filter(
                       (v, i, a) => v >= grandTotal && a.indexOf(v) === i
@@ -718,7 +1002,7 @@ export const BillingTab: React.FC<BillingTabProps> = ({
         )}
       </div>
 
-      {/* 4. Bill Preview & Action Section (shows automatically after generating bill or clicking preview) */}
+      {/* 4. Bill Preview & Action Section */}
       {currentInvoice && (
         <div className="mt-6">
           <PrintableInvoice
@@ -731,7 +1015,49 @@ export const BillingTab: React.FC<BillingTabProps> = ({
         </div>
       )}
 
+      {/* 5. FLOATING QUICK ACTIONS BUTTON (Requested by user) */}
+      <div className="fixed bottom-20 right-4 md:bottom-8 md:right-8 z-40 no-print">
+        <button
+          type="button"
+          onClick={() => setIsQuickActionsOpen(true)}
+          className="group relative inline-flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-[#FFC107] via-amber-400 to-[#FFB300] hover:from-amber-400 hover:to-amber-500 text-stone-950 font-black text-xs sm:text-sm rounded-full shadow-2xl shadow-amber-950/30 border-2 border-amber-200 transform hover:scale-105 active:scale-95 transition-all"
+        >
+          <span className="absolute -top-1 -right-1 flex h-3 w-3">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
+          </span>
+          <div className="w-6 h-6 rounded-full bg-[#7B001C] text-[#FFC107] flex items-center justify-center font-bold">
+            <Sparkles className="w-3.5 h-3.5" />
+          </div>
+          <span>+ Quick Actions (कस्टम आइटम)</span>
+        </button>
+      </div>
+
       {/* Modals */}
+      <QuickActionsModal
+        isOpen={isQuickActionsOpen}
+        onClose={() => setIsQuickActionsOpen(false)}
+        onAddCustomItemToCart={handleAddCustomItem}
+        onApplyDiscount={handleApplyDiscount}
+        cart={cart}
+        customerName={custName}
+        customerPhone={custPhone}
+        parkedBills={parkedBills}
+        onParkCurrentBill={handleParkCurrentBill}
+        onResumeParkedBill={handleResumeParkedBill}
+        onDeleteParkedBill={handleDeleteParkedBill}
+        categories={settings.categories}
+        units={settings.units}
+      />
+
+      <DeviceConnectModal
+        isOpen={isDeviceModalOpen}
+        onClose={() => setIsDeviceModalOpen(false)}
+        settings={settings}
+        onUpdateHardware={onUpdateHardware}
+        products={products}
+      />
+
       <CameraScannerModal
         isOpen={isCameraOpen}
         onClose={() => setIsCameraOpen(false)}

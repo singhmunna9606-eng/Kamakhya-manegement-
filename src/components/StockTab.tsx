@@ -193,13 +193,14 @@ export const StockTab: React.FC<StockTabProps> = ({
               <label className="block text-xs font-semibold text-stone-600 mb-1">Category</label>
               <select
                 value={category}
-                onChange={(e) => setCategory(e.target.value as Category)}
+                onChange={(e) => setCategory(e.target.value)}
                 className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs outline-none focus:border-[#7B001C]"
               >
-                <option value="Clothes">Clothes (Kapde)</option>
-                <option value="Cosmetics">Cosmetics (Makeup & Beauty)</option>
-                <option value="Jewellery">Jewellery (Gehne / Kundan)</option>
-                <option value="General">General</option>
+                {(settings.categories || ['Clothes', 'Cosmetics', 'Jewellery', 'General']).map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -255,11 +256,11 @@ export const StockTab: React.FC<StockTabProps> = ({
                   onChange={(e) => setUnit(e.target.value)}
                   className="w-full px-2 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs outline-none"
                 >
-                  <option value="pcs">pcs</option>
-                  <option value="set">set</option>
-                  <option value="box">box</option>
-                  <option value="pair">pair</option>
-                  <option value="mtr">mtr</option>
+                  {(settings.units || ['pcs', 'set', 'box', 'pair', 'mtr']).map((u) => (
+                    <option key={u} value={u}>
+                      {u}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -338,26 +339,41 @@ export const StockTab: React.FC<StockTabProps> = ({
 
         {/* Filter Pills */}
         <div className="flex flex-wrap gap-1.5 mb-4">
-          {(['All', 'Clothes', 'Cosmetics', 'Jewellery', 'General', 'LowStock'] as const).map(
-            (tab) => (
-              <button
-                key={tab}
-                onClick={() => setSelectedFilter(tab)}
-                className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
-                  selectedFilter === tab
-                    ? 'bg-[#7B001C] text-white shadow-xs'
-                    : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
-                }`}
-              >
-                {tab === 'All' && 'Sabhi (All)'}
-                {tab === 'Clothes' && '👗 Clothes'}
-                {tab === 'Cosmetics' && '💄 Cosmetics'}
-                {tab === 'Jewellery' && '💍 Jewellery'}
-                {tab === 'General' && '📦 General'}
-                {tab === 'LowStock' && `⚠️ Kam Stock (${lowStockCount})`}
-              </button>
-            )
-          )}
+          <button
+            onClick={() => setSelectedFilter('All')}
+            className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+              selectedFilter === 'All'
+                ? 'bg-[#7B001C] text-white shadow-xs'
+                : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+            }`}
+          >
+            Sabhi (All)
+          </button>
+
+          {(settings.categories || ['Clothes', 'Cosmetics', 'Jewellery', 'General']).map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setSelectedFilter(cat)}
+              className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                selectedFilter === cat
+                  ? 'bg-[#7B001C] text-white shadow-xs'
+                  : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+
+          <button
+            onClick={() => setSelectedFilter('LowStock')}
+            className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+              selectedFilter === 'LowStock'
+                ? 'bg-red-700 text-white shadow-xs'
+                : 'bg-red-50 text-red-700 hover:bg-red-100'
+            }`}
+          >
+            ⚠️ Kam Stock ({lowStockCount})
+          </button>
         </div>
 
         {/* Inventory Table */}

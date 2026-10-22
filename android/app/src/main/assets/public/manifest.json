@@ -1,0 +1,20 @@
+{
+  "id": "/",
+  "name": "Kamakhya Management - Clothes & Cosmetics POS",
+  "short_name": "Kamakhya POS",
+  "description": "Complete POS Billing, Stock Inventory, Barcode Scanner Gun & Thermal Printing for Kamakhya Clothes & Cosmetics.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#7B001C",
+  "background_color": "#560013",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

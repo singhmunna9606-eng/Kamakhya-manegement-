@@ -8,13 +8,26 @@
   --white: #FFFFFF;
   --bg: #F8F9FA;
   --text: #2D3748;
+
+  --theme-primary: #7B001C;
+  --theme-dark: #560013;
+  --theme-accent: #FFC107;
+  --theme-accent-light: #FFE082;
+  --theme-bg: #fbfbf9;
 }
 
 body {
-  font-family: 'Poppins', sans-serif;
-  background-color: #fbfbf9;
+  background-color: var(--theme-bg, #fbfbf9);
   color: #2D3748;
 }
+
+.font-poppins { font-family: 'Poppins', sans-serif; }
+.font-inter { font-family: 'Inter', sans-serif; }
+.font-roboto { font-family: 'Roboto', sans-serif; }
+.font-outfit { font-family: 'Outfit', sans-serif; }
+.font-playfair { font-family: 'Playfair Display', serif; }
+.font-georgia { font-family: 'Georgia', serif; }
+.font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 
 /* Custom scrollbars */
 ::-webkit-scrollbar {
