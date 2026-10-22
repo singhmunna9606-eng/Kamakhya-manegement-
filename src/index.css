@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+:root {
+  --maroon: #7B001C;
+  --maroon-dark: #560013;
+  --yellow: #FFC107;
+  --yellow-light: #FFE082;
+  --white: #FFFFFF;
+  --bg: #F8F9FA;
+  --text: #2D3748;
+}
+
+body {
+  font-family: 'Poppins', sans-serif;
+  background-color: #fbfbf9;
+  color: #2D3748;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Print Rules - Hide all interactive chrome and print only invoice or barcode labels */
+@media print {
+  body {
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  
+  header,
+  nav,
+  .bottom-nav,
+  .no-print,
+  button,
+  input,
+  select {
+    display: none !important;
+  }
+
+  /* When printing invoice */
+  #printableInvoice {
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 10px !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  /* When printing barcode sheet */
+  #printableBarcodeSheet {
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 10px !important;
+  }
+}

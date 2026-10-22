@@ -1,0 +1,6 @@
+{
+  "name": "Kamakhya Management - Clothes & Cosmetics POS",
+  "description": "Complete POS billing, stock inventory, barcode scanning & printing, and customer management for Kamakhya Clothes & Cosmetics store.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
